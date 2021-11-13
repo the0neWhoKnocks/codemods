@@ -121,7 +121,11 @@ module.exports = function transformer(file, api) {
           break;
         }
         default: {
-          methods.push(jsCS(np).toSource());
+          let funcDef = jsCS(np).toSource();
+          const funcLines = funcDef.split('\n');
+          funcLines[0] = `function ${funcLines[0]}`;
+          funcDef = funcLines.join('\n');
+          methods.push(funcDef);
         }
       }
     });
