@@ -1,5 +1,30 @@
 const { writeFileSync } = require('fs');
-const { basename, dirname, parse } = require('path');
+const { basename, dirname, parse, relative } = require('path');
+
+function setModuleSource(node, val, token) {
+  if (token) {
+    node.raw = node.raw.replace(token, val);
+    node.value = node.value.replace(token, val);
+  }
+  else {
+    node.raw = `'${val}'`;
+    node.value = val;
+  }
+}
+
+const aliasToRelativePath = ({
+  alias,
+  aliasAbsPath,
+  modulePath,
+  outputPath,
+}) => {
+  const transformed = modulePath.replace(alias, aliasAbsPath);
+  let relativePath = relative(outputPath, transformed);
+
+  if(!relativePath.startsWith('.')) relativePath = `./${ relativePath }`;
+  
+  return relativePath;
+};
 
 module.exports = function transformer(file, api) {
   const fullFilePath = file.path;
@@ -19,6 +44,8 @@ module.exports = function transformer(file, api) {
   
   // [imports] =================================================================
   const imports = [];
+  const SRC_REPO__ALIAS_PATH__ROOT = `${fullFilePath.split('/src')[0]}/src`;
+  const SRC_REPO__ALIAS_PATH__COMPONENTS = `${SRC_REPO__ALIAS_PATH__ROOT}/client/components`;
   
   root.find(jsCS.ImportDeclaration)
   	.filter((np) => {
@@ -31,9 +58,16 @@ module.exports = function transformer(file, api) {
       let keep = true;
       
       if (modulePath.startsWith('ROOT')) {
+        const relativePath = aliasToRelativePath({
+          alias: 'ROOT',
+          aliasAbsPath: SRC_REPO__ALIAS_PATH__ROOT,
+          modulePath,
+          outputPath: SRC_REPO__ALIAS_PATH__COMPONENTS,
+        });
+        setModuleSource(moduleSrc, relativePath);
+        
         if (modulePath.endsWith('conf.app')) {
-          moduleSrc.raw = moduleSrc.raw.replace('conf.app', 'constants');
-          moduleSrc.value = modulePath.replace('conf.app', 'constants');
+          setModuleSource(moduleSrc, 'constants', 'conf.app');
         }
       }
       if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
@@ -105,8 +139,6 @@ module.exports = function transformer(file, api) {
   // TODO:
   // [imports]
   // - transform aliases
-  //   - `ROOT` -> create relative path from current location up to `src/`
-  //     - some components may be nested, but won't be once converted, so have the final path be `src/client/components`
   //   - 'UTILS' -> create relative path from current location up to `src/utils`
   // - If there's an import for `styles`, load and parse it
   // [props]
@@ -172,7 +204,7 @@ module.exports = function transformer(file, api) {
   ].join('\n');
   // return root.toSource();
   
-  writeFileSync(`${fileFolder}/${fileName}.svelte`, output);
+  writeFileSync(`${SRC_REPO__ALIAS_PATH__COMPONENTS}/${fileName}.svelte`, output);
   
   return output;
 }
