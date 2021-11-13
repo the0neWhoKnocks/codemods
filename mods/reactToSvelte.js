@@ -5,6 +5,10 @@ module.exports = function transformer(file, api) {
   const fullFilePath = file.path;
   const fileContents = file.source;
   const jsCS = api.jscodeshift;
+  const recastOpts = { // https://github.com/benjamn/recast/blob/master/lib/options.ts
+    quote: 'single',
+    tabWidth: 2,
+  };
   
   const fileFolder = dirname(fullFilePath);
   let fileName = parse(basename(fullFilePath)).name;
@@ -117,11 +121,11 @@ module.exports = function transformer(file, api) {
         case 'constructor': break;
         case 'render': {
           const returnNode = jsCS(np).find(jsCS.ReturnStatement).get().value.argument;
-          markup = jsCS([returnNode.openingElement, ...returnNode.children, returnNode.closingElement]).toSource();
+          markup = jsCS([returnNode.openingElement, ...returnNode.children, returnNode.closingElement]).toSource(recastOpts);
           break;
         }
         default: {
-          let funcDef = jsCS(np).toSource();
+          let funcDef = jsCS(np).toSource(recastOpts);
           const funcLines = funcDef.split('\n');
           funcLines[0] = `function ${funcLines[0]}`;
           funcDef = funcLines.join('\n');
