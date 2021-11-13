@@ -46,6 +46,7 @@ module.exports = function transformer(file, api) {
   const imports = [];
   const SRC_REPO__ALIAS_PATH__ROOT = `${fullFilePath.split('/src')[0]}/src`;
   const SRC_REPO__ALIAS_PATH__COMPONENTS = `${SRC_REPO__ALIAS_PATH__ROOT}/client/components`;
+  const SRC_REPO__ALIAS_PATH__UTILS = `${SRC_REPO__ALIAS_PATH__ROOT}/utils`;
   
   root.find(jsCS.ImportDeclaration)
   	.filter((np) => {
@@ -68,6 +69,19 @@ module.exports = function transformer(file, api) {
         
         if (modulePath.endsWith('conf.app')) {
           setModuleSource(moduleSrc, 'constants', 'conf.app');
+        }
+      }
+      else if (modulePath.startsWith('UTILS')) {
+        const relativePath = aliasToRelativePath({
+          alias: 'UTILS',
+          aliasAbsPath: SRC_REPO__ALIAS_PATH__ROOT,
+          modulePath,
+          outputPath: SRC_REPO__ALIAS_PATH__COMPONENTS,
+        });
+        setModuleSource(moduleSrc, relativePath);
+        
+        if (modulePath.endsWith('fetch')) {
+          setModuleSource(moduleSrc, '../fetch');
         }
       }
       if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
@@ -138,8 +152,6 @@ module.exports = function transformer(file, api) {
   
   // TODO:
   // [imports]
-  // - transform aliases
-  //   - 'UTILS' -> create relative path from current location up to `src/utils`
   // - If there's an import for `styles`, load and parse it
   // [props]
   // - Remove calls like `const { seriesName } = this.props;` create exported props
