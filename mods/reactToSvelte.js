@@ -131,9 +131,12 @@ module.exports = function transformer(file, api) {
     });
   }
   
+  const tabOver = (arr, space) => arr.map(n => n.split('\n').map(l => `${space}${l}`).join('\n'));
+  const SCRIPT_SPACE = '  ';
+  
   const output = [
     '<script>',
-    methods.map(m => m.split('\n').map(l => `  ${l}`).join('\n')).join('\n\n'),
+    tabOver(methods, SCRIPT_SPACE).join('\n\n'),
     '</script>',
     '',
     markup.join(''),
