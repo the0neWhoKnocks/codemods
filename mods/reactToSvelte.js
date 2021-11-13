@@ -17,6 +17,30 @@ module.exports = function transformer(file, api) {
   const root = jsCS(fileContents);
   const refs = [];
   
+  // [imports] =================================================================
+  const imports = [];
+  
+  root.find(jsCS.ImportDeclaration)
+  	.filter((np) => {
+      const modulePath = np.value.source.value;
+      return !/(react|prop-types)/.test(modulePath);
+  	})
+    .forEach((np) => {
+      const moduleSrc = np.value.source;
+      const modulePath = moduleSrc.value;
+      let keep = true;
+      
+      if (modulePath.startsWith('ROOT')) {
+        if (modulePath.endsWith('conf.app')) {
+          moduleSrc.raw = moduleSrc.raw.replace('conf.app', 'constants');
+          moduleSrc.value = modulePath.replace('conf.app', 'constants');
+        }
+      }
+      if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
+    });
+  
+  // ===========================================================================
+  
   // jsCS.types.Type.def('SvelteIf')
   //   .bases('IfStatement')
   //   .build('name', 'program')
@@ -80,13 +104,11 @@ module.exports = function transformer(file, api) {
   
   // TODO:
   // [imports]
-  // - Remove `react` and `prop-types`
   // - transform aliases
   //   - `ROOT` -> create relative path from current location up to `src/`
   //     - some components may be nested, but won't be once converted, so have the final path be `src/client/components`
-  //   - 'ROOT/conf.app' -> point to constants
   //   - 'UTILS' -> create relative path from current location up to `src/utils`
-  // - If there's an import for `styles`
+  // - If there's an import for `styles`, load and parse it
   // [props]
   // - Remove calls like `const { seriesName } = this.props;` create exported props
   // - Remove `this.props.<FUNC_OR_PROP>`, just call function or use variable
@@ -140,6 +162,8 @@ module.exports = function transformer(file, api) {
   
   const output = [
     '<script>',
+    tabOver(imports, SCRIPT_SPACE).join('\n'),
+    '  ',
     tabOver(methods, SCRIPT_SPACE).join('\n\n'),
     '</script>',
     '',
