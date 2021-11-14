@@ -100,7 +100,6 @@ module.exports = function transformer(file, api) {
   if (fileName === 'index') fileName = basename(fileFolder);
   
   const root = jsCS(fileContents);
-  const refs = [];
   
   // [imports] =================================================================
   const imports = [];
@@ -200,12 +199,15 @@ module.exports = function transformer(file, api) {
       if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
     });
   
-  // [ internal state ] ========================================================
+  // [ constructor ] ===========================================================
   
   const constructMethod = root.find(jsCS.MethodDefinition, { key: { name: 'constructor' } });
   let internalState = [];
+  let refs = [];
   
   if (constructMethod.length) {
+    // [ internal state ] ======================================================
+    
     const constructNode = jsCS(constructMethod.get().node);
     const initState = constructNode.find(jsCS.MemberExpression, { property: { name: 'state' } });
     
@@ -213,6 +215,35 @@ module.exports = function transformer(file, api) {
       const stateProps = initState.get().parentPath.node.right.properties;
       internalState = stateProps.map((node) => {
         return `let ${node.key.name} = ${node.value.raw};`;
+      });
+    }
+    
+    // [ createRef ] ===========================================================
+    
+    const createRef = root.find(jsCS.CallExpression, { callee: { property: { name: 'createRef' } } });
+    if (createRef.length) {
+      createRef.forEach((np) => {
+        const refName = np.parentPath.node.left.property.name;
+        refs.push(refName);
+        
+        // Find anything using `this.<refName>.current[.<prop>]` and remove 
+        // references to `this` and `current`.
+        root
+          .find(jsCS.MemberExpression, {
+            object: {
+              object: {
+                object: { type: 'ThisExpression' },
+                property: { name: refName },
+              },
+              property: { name: 'current' },
+            },
+          })
+          .replaceWith((np) => {
+            const currentProp = np.node.property.name;
+            return currentProp
+              ? jsCS.memberExpression(jsCS.identifier(refName), jsCS.identifier(currentProp))
+              : jsCS.identifier(refName);
+          });
       });
     }
   }
@@ -271,16 +302,8 @@ module.exports = function transformer(file, api) {
     }
   });
   
-  // define any refs
-  // const scriptTag = root.find(jsCS.JSXOpeningElement, { name: { name: 'script' } }).get();
-  // refs.forEach((ref) => {
-  //   scriptTag.parentPath.value.children.push(
-  //     jsCS.variableDeclaration('let', [jsCS.variableDeclarator(jsCS.identifier(ref), null)]),
-  //     '\n'
-  //   );
-  // });
-  
   // TODO:
+  // [import]
   // [props]
   // - Remove calls like `const { seriesName } = this.props;` create exported props
   // - Remove `this.props.<FUNC_OR_PROP>`, just call function or use variable
@@ -288,10 +311,6 @@ module.exports = function transformer(file, api) {
   // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
   // - Remove destructuring `const { applyBtnDisabled } = this.state;`
   // [refs]
-  // - Any `this.seriesNameInputRef = React.createRef();` should be converted to empty `let` vars
-  // - `this.seriesNameInputRef.current.value`
-  //   - Remove `this.`
-  //   - Remove `current.`
   // [class]
   // - `class={`${ ROOT_CLASS } ${ styles }`}`
   //   - Remove ` ${ styles }`
@@ -338,9 +357,18 @@ module.exports = function transformer(file, api) {
       SCRIPT_SPACE
     );
   }
-  if (internalState.length) {
+  if (internalState.length || refs.length) {
+    const vars = [];
+    
+    if (internalState.length) vars.push(tabOver(internalState, SCRIPT_SPACE).join('\n'));
+    
+    if (refs.length) {
+      refs = [...new Set(refs)].map(ref => `let ${ref};`);
+      vars.push(tabOver(refs, SCRIPT_SPACE).join('\n'));
+    }
+    
     script.push(
-      tabOver(internalState, SCRIPT_SPACE).join('\n'),
+      ...vars,
       SCRIPT_SPACE
     );
   }
