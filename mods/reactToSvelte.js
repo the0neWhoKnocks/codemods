@@ -200,6 +200,14 @@ module.exports = function transformer(file, api) {
       if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
     });
   
+  // [ internal state ] ========================================================
+  
+  const constructMethod = jsCS(root.find(jsCS.MethodDefinition, { key: { name: 'constructor' } }).get().node);
+  const initState = constructMethod.find(jsCS.MemberExpression, { property: { name: 'state' } }).get().parentPath.node.right.properties;
+  const internalState = initState.map((node) => {
+    return `let ${node.key.name} = ${node.value.raw};`;
+  });
+  
   // ===========================================================================
   
   // jsCS.types.Type.def('SvelteIf')
@@ -268,7 +276,6 @@ module.exports = function transformer(file, api) {
   // - Remove calls like `const { seriesName } = this.props;` create exported props
   // - Remove `this.props.<FUNC_OR_PROP>`, just call function or use variable
   // [state]
-  // - Any `this.state` initialization in `constructor` should be converted to `let` vars
   // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
   // - Remove destructuring `const { applyBtnDisabled } = this.state;`
   // [refs]
@@ -318,6 +325,8 @@ module.exports = function transformer(file, api) {
   const output = [
     '<script>',
     tabOver(imports, SCRIPT_SPACE).join('\n'),
+    '  ',
+    tabOver(internalState, SCRIPT_SPACE).join('\n'),
     '  ',
     tabOver(methods, SCRIPT_SPACE).join('\n\n'),
     '</script>',
