@@ -1,4 +1,4 @@
-const { writeFileSync } = require('fs');
+const { readFileSync, writeFileSync } = require('fs');
 const { basename, dirname, parse, relative } = require('path');
 
 function setModuleSource(node, val, token) {
@@ -26,6 +26,66 @@ const aliasToRelativePath = ({
   return relativePath;
 };
 
+const parseNestedStyles = (css) => {
+  const ruleNames = [];
+  let bracketIndent = '';
+  const rawLines = css.split('\n');
+  let rulesOffset;
+  const lines = rawLines.reduce((arr, line) => {
+    if (line === '--') return arr;
+    
+    let _line = line;
+    
+    if (!rulesOffset) {
+      const space = (_line.match(/^\s+/) || [''])[0];
+      rulesOffset = new RegExp(`^${space}`);
+    }
+    
+    _line = _line.replace(rulesOffset, '');
+    
+    if (_line.includes('}')) {
+      ruleNames.pop();
+      if (ruleNames.length) return arr;
+    }
+    else if (_line.includes('{') && !_line.includes('}')) {
+      bracketIndent = (_line.match(/^\s+/) || [''])[0];
+      ruleNames.push((_line.match(/^(?:\s+)?([^ {]+) {/) || [,''])[1]);
+    
+      const nestedRuleName = ruleNames.join(' ').replace(' &', '');
+      _line = `${bracketIndent}${nestedRuleName} {`;
+    
+      // remove empty parent
+      const nextLine = rawLines[arr.length + 1];
+      if (!nextLine.trim()) {
+        rawLines[arr.length + 1] = '--';
+        return arr;
+      }
+    }
+    
+    const prevLine = arr[arr.length - 1];
+    const trimmedLine = _line.trim();
+    
+    // close current rule
+    if (prevLine && !prevLine.includes('}') && trimmedLine === '') {
+      _line = '}';
+    }
+    else if (trimmedLine === '' && prevLine.trim() === '') {
+      return arr;
+    }
+    
+    // remove nested indentation
+    if (ruleNames.length > 1 && bracketIndent) {
+      _line = _line.replace(new RegExp(`^${bracketIndent}`), '');
+    }
+    
+    arr.push(_line);
+    
+    return arr;
+  }, []);
+  
+  return lines;
+};
+
 module.exports = function transformer(file, api) {
   const fullFilePath = file.path;
   const fileContents = file.source;
@@ -47,6 +107,17 @@ module.exports = function transformer(file, api) {
   const SRC_REPO__ALIAS_PATH__ROOT = `${fullFilePath.split('/src')[0]}/src`;
   const SRC_REPO__ALIAS_PATH__COMPONENTS = `${SRC_REPO__ALIAS_PATH__ROOT}/client/components`;
   const SRC_REPO__ALIAS_PATH__UTILS = `${SRC_REPO__ALIAS_PATH__ROOT}/utils`;
+  const cssVarMap = {};
+  let cssRules;
+  
+  const templateLiteralToString = ({ expressions, quasis }) => {
+    let str = '';
+    quasis.forEach((q, ndx) => {
+      const exp = expressions[ndx] ? cssVarMap[expressions[ndx].name] : '';
+      str += `${q.value.raw}${exp}`;
+    });
+    return str;
+  };
   
   root.find(jsCS.ImportDeclaration)
   	.filter((np) => {
@@ -84,6 +155,48 @@ module.exports = function transformer(file, api) {
           setModuleSource(moduleSrc, '../fetch');
         }
       }
+      else if (modulePath.endsWith('styles')) {
+        keep = false;
+        
+        const styles = (modulePath.startsWith('.'))
+          ? readFileSync(`${fileFolder}/${modulePath}.js`, 'utf8')
+          : readFileSync(`${modulePath}.js`, 'utf8');
+        const stylesRoot = jsCS(styles);
+        const cssNode = stylesRoot.find(jsCS.TaggedTemplateExpression, { tag: { name: 'css' } }).get().node.quasi;
+        
+        stylesRoot.find(jsCS.VariableDeclarator, { init: { type: 'Literal' } }).forEach((np) => {
+          const { id, init } = np.node;
+          cssVarMap[id.name] = init.value;
+        });
+        
+        const WRAPPED_SPACE = '  ';
+        let unwrappedRootRule = false;
+        const cssLines = templateLiteralToString(cssNode)
+          .replace(/^\n/, '').replace(/\n$/, '')
+          .split('\n')
+          .map((line, ndx) => {
+            let _line = line;
+            
+            if (ndx === 0 && !_line.includes('{')) {
+              unwrappedRootRule = true;
+              _line = `.${cssVarMap.ROOT_CLASS} {\n${WRAPPED_SPACE}${_line}`;
+            }
+            if (unwrappedRootRule) {
+              if (_line.trim() === '') {
+                _line = `${WRAPPED_SPACE}}\n`;
+                unwrappedRootRule = false;
+              }
+              else {
+                _line = `${WRAPPED_SPACE}${_line}`;
+              }
+            }
+            
+            return _line;
+          });
+        
+        cssRules = parseNestedStyles(cssLines.join('\n'));
+      }
+      
       if (keep) imports.push(jsCS(np.node).toSource(recastOpts));
     });
   
@@ -151,8 +264,6 @@ module.exports = function transformer(file, api) {
   // });
   
   // TODO:
-  // [imports]
-  // - If there's an import for `styles`, load and parse it
   // [props]
   // - Remove calls like `const { seriesName } = this.props;` create exported props
   // - Remove `this.props.<FUNC_OR_PROP>`, just call function or use variable
@@ -213,8 +324,11 @@ module.exports = function transformer(file, api) {
     '',
     markup.join(''),
     '',
+    '<style>',
+    tabOver(cssRules, SCRIPT_SPACE).join('\n'),
+    '</style>',
+    '',
   ].join('\n');
-  // return root.toSource();
   
   writeFileSync(`${SRC_REPO__ALIAS_PATH__COMPONENTS}/${fileName}.svelte`, output);
   
