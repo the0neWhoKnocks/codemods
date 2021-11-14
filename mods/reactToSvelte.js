@@ -202,11 +202,20 @@ module.exports = function transformer(file, api) {
   
   // [ internal state ] ========================================================
   
-  const constructMethod = jsCS(root.find(jsCS.MethodDefinition, { key: { name: 'constructor' } }).get().node);
-  const initState = constructMethod.find(jsCS.MemberExpression, { property: { name: 'state' } }).get().parentPath.node.right.properties;
-  const internalState = initState.map((node) => {
-    return `let ${node.key.name} = ${node.value.raw};`;
-  });
+  const constructMethod = root.find(jsCS.MethodDefinition, { key: { name: 'constructor' } });
+  let internalState = [];
+  
+  if (constructMethod.length) {
+    const constructNode = jsCS(constructMethod.get().node);
+    const initState = constructNode.find(jsCS.MemberExpression, { property: { name: 'state' } });
+    
+    if (initState.length) {
+      const stateProps = initState.get().parentPath.node.right.properties;
+      internalState = stateProps.map((node) => {
+        return `let ${node.key.name} = ${node.value.raw};`;
+      });
+    }
+  }
   
   // ===========================================================================
   
@@ -322,21 +331,48 @@ module.exports = function transformer(file, api) {
   const tabOver = (arr, space) => arr.map(n => n.split('\n').map(l => `${space}${l}`).join('\n'));
   const SCRIPT_SPACE = '  ';
   
+  let script = [];
+  if (imports.length) {
+    script.push(
+      tabOver(imports, SCRIPT_SPACE).join('\n'),
+      SCRIPT_SPACE
+    );
+  }
+  if (internalState.length) {
+    script.push(
+      tabOver(internalState, SCRIPT_SPACE).join('\n'),
+      SCRIPT_SPACE
+    );
+  }
+  if (methods.length) {
+    script.push(tabOver(methods, SCRIPT_SPACE).join('\n\n'));
+  }
+  if (script.length) {
+    script = [
+      '<script>',
+      ...script,
+      '</script>',
+      '',
+    ];
+  }
+  
+  if (markup.length) {
+    markup = [markup.join(''), ''];
+  }
+  
+  if (cssRules.length) {
+    cssRules = [
+      '<style>',
+      tabOver(cssRules, SCRIPT_SPACE).join('\n'),
+      '</style>',
+      '',
+    ];
+  }
+  
   const output = [
-    '<script>',
-    tabOver(imports, SCRIPT_SPACE).join('\n'),
-    '  ',
-    tabOver(internalState, SCRIPT_SPACE).join('\n'),
-    '  ',
-    tabOver(methods, SCRIPT_SPACE).join('\n\n'),
-    '</script>',
-    '',
-    markup.join(''),
-    '',
-    '<style>',
-    tabOver(cssRules, SCRIPT_SPACE).join('\n'),
-    '</style>',
-    '',
+    ...script,
+    ...markup,
+    ...cssRules,
   ].join('\n');
   
   writeFileSync(`${SRC_REPO__ALIAS_PATH__COMPONENTS}/${fileName}.svelte`, output);
