@@ -248,6 +248,26 @@ module.exports = function transformer(file, api) {
     }
   }
   
+  // [ props ] =================================================================
+  
+  // function calls
+  let propVars = [];
+  root
+    .find(jsCS.CallExpression, {
+      callee: {
+        object: {
+          object: { type: 'ThisExpression' },
+          property: { name: 'props' },
+        },
+      },
+    })
+    .replaceWith((np) => {
+      const fn = np.node.callee.property;
+      const fnArgs = np.node.arguments;
+      propVars.push([fn.name, '() => {}']);
+      return jsCS.callExpression(fn, fnArgs);
+    });
+  
   // ===========================================================================
   
   // jsCS.types.Type.def('SvelteIf')
@@ -306,7 +326,6 @@ module.exports = function transformer(file, api) {
   // [import]
   // [props]
   // - Remove calls like `const { seriesName } = this.props;` create exported props
-  // - Remove `this.props.<FUNC_OR_PROP>`, just call function or use variable
   // [state]
   // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
   // - Remove destructuring `const { applyBtnDisabled } = this.state;`
@@ -359,6 +378,11 @@ module.exports = function transformer(file, api) {
   }
   if (internalState.length || refs.length) {
     const vars = [];
+    
+    if (propVars.length) {
+      propVars = propVars.map(([prop, value]) => `export let ${prop} = ${value};`);
+      vars.push(tabOver(propVars, SCRIPT_SPACE).join('\n'));
+    }
     
     if (internalState.length) vars.push(tabOver(internalState, SCRIPT_SPACE).join('\n'));
     
