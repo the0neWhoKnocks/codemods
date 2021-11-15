@@ -329,6 +329,22 @@ module.exports = function transformer(file, api) {
       body.splice(bodyNdx, 1, ...assignments);
     });
   
+  // [ remaining 'this.' references ] ==========================================
+  
+  // function calls
+  root
+    .find(jsCS.ExpressionStatement, {
+      expression: {
+        callee: {
+          object: { type: 'ThisExpression' },
+        },
+      },
+    })
+    .replaceWith((np) => {
+      const n = np.node.expression;
+      return jsCS.callStatement(n.callee.property, n.arguments);
+    });
+  
   // ===========================================================================
   
   // jsCS.types.Type.def('SvelteIf')
@@ -389,7 +405,7 @@ module.exports = function transformer(file, api) {
   // [state]
   // [refs]
   // [this]
-  // - Remove any remaining references to `this.`
+  // - Revisit `removeThis` calls now that I know more
   // [markup]
   // - `class={`${ ROOT_CLASS } ${ styles }`}`
   //   - Remove ` ${ styles }`
