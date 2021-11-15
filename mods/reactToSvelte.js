@@ -214,7 +214,7 @@ module.exports = function transformer(file, api) {
     if (initState.length) {
       const stateProps = initState.get().parentPath.node.right.properties;
       internalState = stateProps.map((node) => {
-        return `let ${node.key.name} = ${node.value.raw};`;
+        return [node.key.name, node.value.raw];
       });
     }
     
@@ -224,7 +224,7 @@ module.exports = function transformer(file, api) {
     if (createRef.length) {
       createRef.forEach((np) => {
         const refName = np.parentPath.node.left.property.name;
-        refs.push(refName);
+        refs.push([refName]);
         
         // Find anything using `this.<refName>.current[.<prop>]` and remove 
         // references to `this` and `current`.
@@ -264,8 +264,22 @@ module.exports = function transformer(file, api) {
     .replaceWith((np) => {
       const fn = np.node.callee.property;
       const fnArgs = np.node.arguments;
-      propVars.push([fn.name, '() => {}']);
+      propVars.push([fn.name]);
       return jsCS.callExpression(fn, fnArgs);
+    });
+  
+  // prop destructuring
+  root
+    .find(jsCS.VariableDeclaration, {
+      declarations: [{
+        init: { property: { name: 'props' } },
+      }],
+    })
+    .replaceWith((np) => {
+      const props = np.node.declarations[0].id.properties;
+      props.forEach((prop) => { propVars.push([prop.key.name]); });
+      
+      // not returning so that the line is deleted.
     });
   
   // ===========================================================================
@@ -306,7 +320,7 @@ module.exports = function transformer(file, api) {
     }
     else if (attrName === 'ref') {
       np.value.name = 'bind:this';
-      refs.push(removeThis(np.parentPath.value.value.expression));
+      refs.push([removeThis(np.parentPath.value.value.expression)]);
     }
   });
   
@@ -325,7 +339,6 @@ module.exports = function transformer(file, api) {
   // TODO:
   // [import]
   // [props]
-  // - Remove calls like `const { seriesName } = this.props;` create exported props
   // [state]
   // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
   // - Remove destructuring `const { applyBtnDisabled } = this.state;`
@@ -376,19 +389,42 @@ module.exports = function transformer(file, api) {
       SCRIPT_SPACE
     );
   }
-  if (internalState.length || refs.length) {
+  if (
+    internalState.length
+    || propVars.length
+    || refs.length
+  ) {
     const vars = [];
+    const deDupe = (arr, propArr) => {
+      const [prop] = propArr;
+      if (!arr.find(([p]) => p === prop)) arr.push(propArr);
+      return arr;
+    };
+    const sortVars = ([propA], [propB]) => {
+      const lowerPropA = propA.toLowerCase();
+      const lowerPropB = propB.toLowerCase();
+      const subCheck = (lowerPropB > lowerPropA) ? -1 : 0;
+      return (lowerPropA > lowerPropB) ? 1 : subCheck;
+    }
     
     if (propVars.length) {
-      propVars = propVars.map(([prop, value]) => `export let ${prop} = ${value};`);
+      propVars = propVars.reduce(deDupe, []).sort(sortVars)
+        .map(([prop, value = 'undefined']) => {
+          return `export let ${prop} = ${value};`;
+        });
       vars.push(tabOver(propVars, SCRIPT_SPACE).join('\n'));
     }
     
-    if (internalState.length) vars.push(tabOver(internalState, SCRIPT_SPACE).join('\n'));
-    
-    if (refs.length) {
-      refs = [...new Set(refs)].map(ref => `let ${ref};`);
-      vars.push(tabOver(refs, SCRIPT_SPACE).join('\n'));
+    let internalVars = [];
+    if (internalState.length) internalVars.push(...internalState);
+    if (refs.length) internalVars.push(...refs);
+    if (internalVars.length) {
+      internalVars = internalVars.reduce(deDupe, []).sort(sortVars)
+        .map(([prop, value]) => {
+          const val = (value !== undefined) ? ` = ${value}` : '';
+          return `let ${prop}${val};`;
+        });
+      vars.push(tabOver(internalVars, SCRIPT_SPACE).join('\n'));
     }
     
     script.push(
