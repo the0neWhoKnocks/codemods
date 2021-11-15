@@ -86,6 +86,10 @@ const parseNestedStyles = (css) => {
   return lines;
 };
 
+const getParentBody = (np) => {
+  return (np.name === 'body') ? np.node.body : getParentBody(np.parentPath);
+};
+
 module.exports = function transformer(file, api) {
   const fullFilePath = file.path;
   const fileContents = file.source;
@@ -307,6 +311,24 @@ module.exports = function transformer(file, api) {
       // not returning so that the line is deleted.
     });
   
+  // setState calls
+  root
+    .find(jsCS.CallExpression, {
+      callee: {
+        object: { type: 'ThisExpression' },
+        property: { name: 'setState' },
+      },
+    })
+    .forEach((np) => {
+      const assignments = np.node.arguments[0].properties.map((n) => {
+        return jsCS.expressionStatement(jsCS.assignmentExpression('=', n.key, n.value));
+      });
+      
+      const body = getParentBody(np);
+      const bodyNdx = body.findIndex((n, ndx) => n.start === np.node.start);
+      body.splice(bodyNdx, 1, ...assignments);
+    });
+  
   // ===========================================================================
   
   // jsCS.types.Type.def('SvelteIf')
@@ -365,18 +387,16 @@ module.exports = function transformer(file, api) {
   // [import]
   // [props]
   // [state]
-  // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
   // [refs]
-  // [class]
+  // [this]
+  // - Remove any remaining references to `this.`
+  // [markup]
   // - `class={`${ ROOT_CLASS } ${ styles }`}`
   //   - Remove ` ${ styles }`
   //   - Get `ROOT_CLASS` value from `styles.js` and swap it in.
   //   - If there aren't anymore template strings, change to quoted item
-  // [markup]
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Something's off with the internal spacing of the nested items
-  // [this]
-  // - Remove any remaining references to `this.`
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
