@@ -179,12 +179,14 @@ module.exports = function transformer(file, api) {
       }
       
       if (pathAltered) {
-        let fullModulePath = `${modConf.outputPath}/${moduleSrc.value}`;
-        if (!parse(fullModulePath).ext) fullModulePath = `${fullModulePath}.js`;
+        let modulePath = moduleSrc.value;
+        if (!parse(modulePath).ext) modulePath = `${modulePath}.js`;
+        let fullModulePath = `${modConf.outputPath}/${modulePath}`;
+        
         if (!existsSync(fullModulePath)) {
           console.warn([
-            `[WARN] "${fileName}" won't be able to access:`,
-            `       "${fullModulePath}"`,
+            `[WARN] Module "${modulePath}"`,
+            `       Not accessible from "${modConf.outputPath}/${fileName}.svelte"`,
           ].join('\n'));
         }
       }
