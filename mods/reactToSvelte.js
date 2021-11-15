@@ -457,11 +457,10 @@ module.exports = function transformer(file, api) {
   //   - If there aren't anymore template strings, change to quoted item
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
-  // - Something's off with the internal spacing of the nested items
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
-  let markup = [];
+  let markup;
   if (isClassComponent) {
     root.find(jsCS.MethodDefinition).forEach((np) => {
       const methodName = np.value.key.name;
@@ -470,7 +469,7 @@ module.exports = function transformer(file, api) {
         case 'constructor': break;
         case 'render': {
           const returnNode = jsCS(np).find(jsCS.ReturnStatement).get().value.argument;
-          markup = jsCS([returnNode.openingElement, ...returnNode.children, returnNode.closingElement]).toSource(recastOpts);
+          markup = jsCS(returnNode).toSource(recastOpts);
           break;
         }
         default: {
@@ -555,8 +554,8 @@ module.exports = function transformer(file, api) {
     ];
   }
   
-  if (markup.length) {
-    markup = [markup.join(''), ''];
+  if (markup) {
+    markup = [markup, ''];
   }
   
   if (cssRules.length) {
