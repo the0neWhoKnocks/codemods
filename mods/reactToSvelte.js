@@ -250,8 +250,9 @@ module.exports = function transformer(file, api) {
   
   // [ props ] =================================================================
   
-  // function calls
   let propVars = [];
+  
+  // function calls
   root
     .find(jsCS.CallExpression, {
       callee: {
@@ -272,12 +273,36 @@ module.exports = function transformer(file, api) {
   root
     .find(jsCS.VariableDeclaration, {
       declarations: [{
-        init: { property: { name: 'props' } },
+        init: {
+          object: { type: 'ThisExpression' },
+          property: { name: 'props' },
+        },
       }],
     })
     .replaceWith((np) => {
       const props = np.node.declarations[0].id.properties;
       props.forEach((prop) => { propVars.push([prop.key.name]); });
+      
+      // not returning so that the line is deleted.
+    });
+  
+  // [ state ] =================================================================
+  
+  let stateVars = [];
+  
+  // state destructuring
+  root
+    .find(jsCS.VariableDeclaration, {
+      declarations: [{
+        init: {
+          object: { type: 'ThisExpression' },
+          property: { name: 'state' },
+        },
+      }],
+    })
+    .replaceWith((np) => {
+      const props = np.node.declarations[0].id.properties;
+      props.forEach((prop) => { stateVars.push([prop.key.name]); });
       
       // not returning so that the line is deleted.
     });
@@ -341,7 +366,6 @@ module.exports = function transformer(file, api) {
   // [props]
   // [state]
   // - Replace calls like `this.setState({ applyBtnDisabled: true });` to reference internal `let` vars
-  // - Remove destructuring `const { applyBtnDisabled } = this.state;`
   // [refs]
   // [class]
   // - `class={`${ ROOT_CLASS } ${ styles }`}`
@@ -379,6 +403,8 @@ module.exports = function transformer(file, api) {
     });
   }
   
+  // [ output file ] ===========================================================
+  
   const tabOver = (arr, space) => arr.map(n => n.split('\n').map(l => `${space}${l}`).join('\n'));
   const SCRIPT_SPACE = '  ';
   
@@ -393,6 +419,7 @@ module.exports = function transformer(file, api) {
     internalState.length
     || propVars.length
     || refs.length
+    || stateVars.length
   ) {
     const vars = [];
     const deDupe = (arr, propArr) => {
@@ -416,8 +443,11 @@ module.exports = function transformer(file, api) {
     }
     
     let internalVars = [];
+    // NOTE: the order of these additions are intentional
     if (internalState.length) internalVars.push(...internalState);
     if (refs.length) internalVars.push(...refs);
+    if (stateVars.length) internalVars.push(...stateVars);
+    
     if (internalVars.length) {
       internalVars = internalVars.reduce(deDupe, []).sort(sortVars)
         .map(([prop, value]) => {
