@@ -427,6 +427,7 @@ module.exports = function transformer(file, api) {
   // TODO:
   // [import]
   // [props]
+  // - defaultProps values should be maintained
   // [state]
   // [refs]
   // [this]
@@ -437,6 +438,7 @@ module.exports = function transformer(file, api) {
   //   - Get `ROOT_CLASS` value from `styles.js` and swap it in.
   //   - If there aren't anymore template strings, change to quoted item
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
+  // - Replace blocks `{items.map(` with custom `{#each}`
   // - Something's off with the internal spacing of the nested items
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
