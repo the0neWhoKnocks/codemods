@@ -1,5 +1,10 @@
-const { readFileSync, writeFileSync } = require('fs');
+const { existsSync, readFileSync, writeFileSync } = require('fs');
 const { basename, dirname, parse, relative } = require('path');
+
+let modConf;
+if (process.env.MOD_CONF) modConf = require(process.env.MOD_CONF);
+if (!modConf) throw Error('Missing "MOD_CONF" env. variable');
+if (!modConf.outputPath) throw Error('Missing "outputPath" in "MOD_CONF"');
 
 function setModuleSource(node, val, token) {
   if (token) {
@@ -107,9 +112,6 @@ module.exports = function transformer(file, api) {
   
   // [imports] =================================================================
   const imports = [];
-  const SRC_REPO__ALIAS_PATH__ROOT = `${fullFilePath.split('/src')[0]}/src`;
-  const SRC_REPO__ALIAS_PATH__COMPONENTS = `${SRC_REPO__ALIAS_PATH__ROOT}/client/components`;
-  const SRC_REPO__ALIAS_PATH__UTILS = `${SRC_REPO__ALIAS_PATH__ROOT}/utils`;
   const cssVarMap = {};
   let cssRules;
   
@@ -129,41 +131,64 @@ module.exports = function transformer(file, api) {
   	})
     .forEach((np) => {
       const moduleSrc = np.value.source;
-      const modulePath = moduleSrc.value;
+      const { aliases, moduleReplacements, outputPath } = modConf;
       let keep = true;
+      let pathAltered = false;
       
-      if (modulePath.startsWith('ROOT')) {
-        const relativePath = aliasToRelativePath({
-          alias: 'ROOT',
-          aliasAbsPath: SRC_REPO__ALIAS_PATH__ROOT,
-          modulePath,
-          outputPath: SRC_REPO__ALIAS_PATH__COMPONENTS,
-        });
-        setModuleSource(moduleSrc, relativePath);
-        
-        if (modulePath.endsWith('conf.app')) {
-          setModuleSource(moduleSrc, 'constants', 'conf.app');
+      if (moduleReplacements) {
+        for (let i=0; i<moduleReplacements.length; i++) {
+          const [query, matcher, replacement] = moduleReplacements[i];
+          
+          if (query.test(moduleSrc.value)) {
+            setModuleSource(moduleSrc, replacement, matcher);
+            pathAltered = true;
+            break;
+          }
         }
       }
-      else if (modulePath.startsWith('UTILS')) {
-        const relativePath = aliasToRelativePath({
-          alias: 'UTILS',
-          aliasAbsPath: SRC_REPO__ALIAS_PATH__ROOT,
-          modulePath,
-          outputPath: SRC_REPO__ALIAS_PATH__COMPONENTS,
-        });
-        setModuleSource(moduleSrc, relativePath);
+      
+      if (aliases) {
+        const a = Object.keys(aliases);
+        let alias;
         
-        if (modulePath.endsWith('fetch')) {
-          setModuleSource(moduleSrc, '../fetch');
+        for (let i=0; i<a.length; i++) {
+          const _alias = a[i];
+          
+          if (moduleSrc.value.startsWith(_alias)) {
+            alias = [_alias, aliases[_alias]];
+            break;
+          }
+        }
+        
+        if (alias) {
+          const relativePath = aliasToRelativePath({
+            alias: alias[0],
+            aliasAbsPath: alias[1],
+            modulePath: moduleSrc.value,
+            outputPath,
+          });
+          setModuleSource(moduleSrc, relativePath);
+          pathAltered = true;
         }
       }
-      else if (modulePath.endsWith('styles')) {
+      
+      if (pathAltered) {
+        let fullModulePath = `${modConf.outputPath}/${moduleSrc.value}`;
+        if (!parse(fullModulePath).ext) fullModulePath = `${fullModulePath}.js`;
+        if (!existsSync(fullModulePath)) {
+          console.warn([
+            `[WARN] "${fileName}" won't be able to access:`,
+            `       "${fullModulePath}"`,
+          ].join('\n'));
+        }
+      }
+      
+      if (moduleSrc.value.endsWith('styles')) {
         keep = false;
         
-        const styles = (modulePath.startsWith('.'))
-          ? readFileSync(`${fileFolder}/${modulePath}.js`, 'utf8')
-          : readFileSync(`${modulePath}.js`, 'utf8');
+        const styles = (moduleSrc.value.startsWith('.'))
+          ? readFileSync(`${fileFolder}/${moduleSrc.value}.js`, 'utf8')
+          : readFileSync(`${moduleSrc.value}.js`, 'utf8');
         const stylesRoot = jsCS(styles);
         const cssNode = stylesRoot.find(jsCS.TaggedTemplateExpression, { tag: { name: 'css' } }).get().node.quasi;
         
@@ -529,7 +554,7 @@ module.exports = function transformer(file, api) {
     ...cssRules,
   ].join('\n');
   
-  writeFileSync(`${SRC_REPO__ALIAS_PATH__COMPONENTS}/${fileName}.svelte`, output);
+  writeFileSync(`${modConf.outputPath}/${fileName}.svelte`, output);
   
   return output;
 }
