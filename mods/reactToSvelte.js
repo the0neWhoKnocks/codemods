@@ -110,6 +110,12 @@ module.exports = function transformer(file, api) {
   
   const root = jsCS(fileContents);
   
+  const renderNode = (value) => {
+    let _value = value;
+    if (typeof _value === 'object') _value = jsCS(_value).toSource();
+    return _value;
+  };
+  
   // [imports] =================================================================
   const imports = [];
   const cssVarMap = {};
@@ -242,8 +248,8 @@ module.exports = function transformer(file, api) {
     
     if (initState.length) {
       const stateProps = initState.get().parentPath.node.right.properties;
-      internalState = stateProps.map((node) => {
-        return [node.key.name, node.value.raw];
+      internalState = stateProps.map(({ key, value }) => {
+        return [key.name, value];
       });
     }
     
@@ -280,6 +286,17 @@ module.exports = function transformer(file, api) {
   // [ props ] =================================================================
   
   let propVars = [];
+  
+  // default props
+  root
+    .find(jsCS.AssignmentExpression, {
+      left: { property: { name: 'defaultProps' } }
+    })
+    .forEach((np) => {
+      np.node.right.properties.forEach(({ key, value }) => {
+        propVars.push([key.name, value]);
+      });
+    });
   
   // function calls
   root
@@ -427,7 +444,6 @@ module.exports = function transformer(file, api) {
   // TODO:
   // [import]
   // [props]
-  // - defaultProps values should be maintained
   // [state]
   // [refs]
   // [this]
@@ -500,7 +516,7 @@ module.exports = function transformer(file, api) {
     if (propVars.length) {
       propVars = propVars.reduce(deDupe, []).sort(sortVars)
         .map(([prop, value = 'undefined']) => {
-          return `export let ${prop} = ${value};`;
+          return `export let ${prop} = ${renderNode(value)};`;
         });
       vars.push(tabOver(propVars, SCRIPT_SPACE).join('\n'));
     }
@@ -514,7 +530,7 @@ module.exports = function transformer(file, api) {
     if (internalVars.length) {
       internalVars = internalVars.reduce(deDupe, []).sort(sortVars)
         .map(([prop, value]) => {
-          const val = (value !== undefined) ? ` = ${value}` : '';
+          const val = (value !== undefined) ? ` = ${renderNode(value)}` : '';
           return `let ${prop}${val};`;
         });
       vars.push(tabOver(internalVars, SCRIPT_SPACE).join('\n'));
