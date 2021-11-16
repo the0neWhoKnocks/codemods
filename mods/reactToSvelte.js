@@ -570,7 +570,6 @@ module.exports = function transformer(file, api) {
   // [refs]
   // [this]
   // [markup]
-  // - `children` props should be replaced with `<slot></slot>`
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
   // [processing]
@@ -604,6 +603,13 @@ module.exports = function transformer(file, api) {
   }
   
   if (fnBody) {
+    const jsxEl = (ident) => (
+      jsCS.jsxElement(
+        jsCS.jsxOpeningElement(jsCS.jsxIdentifier(ident)),
+        jsCS.jsxClosingElement(jsCS.jsxIdentifier(ident))
+      )
+    );
+    
     fnBody.forEach((node) => {
       if (node) {
         if (node.type === 'VariableDeclaration') {
@@ -620,6 +626,16 @@ module.exports = function transformer(file, api) {
           }
         }
         else if (node.type === 'ReturnStatement') {
+          jsCS(node)
+            .find(jsCS.JSXExpressionContainer, {
+              expression: { name: 'children' },
+            })
+            .replaceWith(np => {
+              const propNdx = propVars.findIndex(([p]) => p === 'children');
+              propVars.splice(propNdx, 1);
+              return jsxEl('slot');
+            });
+          
           markup = jsCS(node.argument).toSource({
             ...recastOpts,
             quote: 'double',
