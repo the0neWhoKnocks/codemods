@@ -117,6 +117,7 @@ module.exports = function transformer(file, api) {
     quote: 'single',
     tabWidth: 2,
   };
+  let fnBody;
   
   const fileFolder = dirname(fullFilePath);
   let fileName = parse(basename(fullFilePath)).name;
@@ -384,6 +385,21 @@ module.exports = function transformer(file, api) {
       // not returning so that the line is deleted.
     });
   
+  // from functional components
+  root.find(jsCS.ExportDefaultDeclaration).forEach((np) => {
+    if (np.node.declaration && np.node.declaration.name) {
+      root.find(jsCS.VariableDeclarator, {
+        id: { name: np.node.declaration.name }
+      })
+      .forEach((np) => {
+        np.node.init.params[0].properties.forEach(({ key }) => {
+          propVars.push([key.name]);
+        });
+        fnBody = np.node.init.body.body;
+      });
+    }
+  });
+  
   // [ state ] =================================================================
   
   let stateVars = [];
@@ -550,12 +566,10 @@ module.exports = function transformer(file, api) {
   // TODO:
   // [import]
   // [props]
-  // - parse functional args
   // [state]
   // [refs]
   // [this]
   // [markup]
-  // - parse functional return
   // - `children` props should be replaced with `<slot></slot>`
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
@@ -575,40 +589,7 @@ module.exports = function transformer(file, api) {
       switch(methodName) {
         case 'constructor': break;
         case 'render': {
-          np.node.value.body.body.forEach((node) => {
-            if (node) {
-              if (node.type === 'VariableDeclaration') {
-                const v = node.declarations[0].init.property;
-                
-                if (
-                  !v // normal variables
-                  || ( // destructured variables
-                    v && v.name
-                    && (v.name !== 'props' && v.name !== 'state')
-                  )
-                ) {
-                  miscRenderItems.push(node);
-                }
-              }
-              else if (node.type === 'ReturnStatement') {
-                markup = jsCS(node.argument).toSource({
-                  ...recastOpts,
-                  quote: 'double',
-                }).split('\n');
-              }
-              else miscRenderItems.push(node);
-            }
-          });
-          
-          if (miscRenderItems.length) {
-            const raw = jsCS(miscRenderItems).toSource().join('\n');
-            miscRenderItems = [
-              '',
-              '// TODO: [manual refactor required] !!!!!!!',
-              ...raw.split('\n'),
-              '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-            ];
-          }
+          fnBody = np.node.value.body.body;
           break;
         }
         default: {
@@ -620,6 +601,43 @@ module.exports = function transformer(file, api) {
         }
       }
     });
+  }
+  
+  if (fnBody) {
+    fnBody.forEach((node) => {
+      if (node) {
+        if (node.type === 'VariableDeclaration') {
+          const v = node.declarations[0].init.property;
+          
+          if (
+            !v // normal variables
+            || ( // destructured variables
+              v && v.name
+              && (v.name !== 'props' && v.name !== 'state')
+            )
+          ) {
+            miscRenderItems.push(node);
+          }
+        }
+        else if (node.type === 'ReturnStatement') {
+          markup = jsCS(node.argument).toSource({
+            ...recastOpts,
+            quote: 'double',
+          }).split('\n');
+        }
+        else miscRenderItems.push(node);
+      }
+    });
+    
+    if (miscRenderItems.length) {
+      const raw = jsCS(miscRenderItems).toSource().join('\n');
+      miscRenderItems = [
+        '',
+        '// TODO: [manual refactor required] !!!!!!!',
+        ...raw.split('\n'),
+        '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+      ];
+    }
   }
   
   // [ output file ] ===========================================================
