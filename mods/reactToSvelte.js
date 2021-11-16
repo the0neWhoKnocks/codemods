@@ -467,6 +467,7 @@ module.exports = function transformer(file, api) {
   root.find(jsCS.JSXIdentifier).forEach((np) => {
     const attrName = np.value.name;
     if (attrName === 'defaultValue') np.value.name = 'value';
+    else if (attrName === 'htmlFor') np.value.name = 'for';
     else if (attrName.startsWith('on')) {
       const parentName = np.parentPath.parentPath.parentPath.value.name.name;
       const standardDomNode = /[a-z]/.test(parentName[0]);
@@ -498,11 +499,15 @@ module.exports = function transformer(file, api) {
   
   // TODO:
   // [import]
+  // - internal vars for 'styles' should be converted to `var()` statements
   // [props]
+  // - parse functional args
   // [state]
   // [refs]
   // [this]
   // [markup]
+  // - parse functional return
+  // - `children` props should be replaced with `<slot></slot>`
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
   // [processing]
@@ -511,7 +516,7 @@ module.exports = function transformer(file, api) {
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
-  let markup;
+  let markup = [];
   let miscRenderItems = [];
   
   if (isClassComponent) {
@@ -540,7 +545,7 @@ module.exports = function transformer(file, api) {
                 markup = jsCS(node.argument).toSource({
                   ...recastOpts,
                   quote: 'double',
-                });
+                }).split('\n');
               }
               else miscRenderItems.push(node);
             }
@@ -642,8 +647,8 @@ module.exports = function transformer(file, api) {
     ];
   }
   
-  if (markup) {
-    markup = [markup, ''];
+  if (markup.length) {
+    markup = [...markup, ''];
   }
   
   if (cssRules.length) {

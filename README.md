@@ -43,8 +43,8 @@ Handles:
 
 ```sh
 # run on another repo (common use case)
-MOD_REPO="${HOME}/path/to/this/repo"; MOD_CONF="${PWD}/reactToSvelte.conf.js" jscodeshift --dry --transform="${MOD_REPO}/mods/reactToSvelte.js" "${PWD}/src/components/ComponentName/index.js"
+MOD_REPO="${HOME}/path/to/this/repo"; MOD_CONF="${PWD}/reactToSvelte.conf.js" jscodeshift --dry --transform="${MOD_REPO}/mods/reactToSvelte.js" $(find "${PWD}/src/components" -name "index.js")
 
 # run example in this repo
-MOD_CONF="${PWD}/example/react/reactToSvelte.conf.js" jscodeshift --dry --transform="${PWD}/mods/reactToSvelte.js" "${PWD}/example/react/components/Component1/index.js"
+MOD_CONF="${PWD}/example/react/reactToSvelte.conf.js" jscodeshift --dry --transform="${PWD}/mods/reactToSvelte.js" $(find "${PWD}/example/react/components" -name "index.js")
 ```
