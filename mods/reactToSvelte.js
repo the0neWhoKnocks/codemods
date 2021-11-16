@@ -389,7 +389,7 @@ module.exports = function transformer(file, api) {
       return jsCS.callStatement(n.callee.property, n.arguments);
     });
   
-  // ===========================================================================
+  // [ markup ] ================================================================
   
   // jsCS.types.Type.def('SvelteIf')
   //   .bases('IfStatement')
@@ -410,10 +410,63 @@ module.exports = function transformer(file, api) {
     return propName;
   }
   
+  // parse 'className' attributes
+  // - change attribute to `class`
+  // - compile any template strings and convert them to a string literal if no
+  //   tokens remain after compiled.
+  root
+    .find(jsCS.JSXAttribute, {
+      name: { name: 'className' },
+    })
+    .replaceWith((np) => {
+      const node = np.node;
+      node.name = 'class';
+      if (node.value.type === 'JSXExpressionContainer') {
+        const { expressions, quasis } = node.value.expression;
+        const exp = [];
+        const qwz = [];
+        
+        quasis.forEach(({ value }, ndx) => {
+          const token = expressions[ndx];
+          const val = { ...value };
+          let append = false;
+          
+          if (token) {
+            // replace tokens from CSS
+            if (cssVarMap[token.name]) {
+              val.cooked = `${val.cooked}${cssVarMap[token.name]}`;
+              val.raw = `${val.raw}${cssVarMap[token.name]}`;
+              append = true;
+            }
+            // omit certain tokens
+            else if (token.name === 'styles') {
+              append = true;
+            }
+            // add remaining tokens
+            else {
+              exp.push(token);
+            }
+          }
+          
+          if (append && qwz.length) {
+            const q = qwz[qwz.length - 1].value;
+            q.cooked = `${q.cooked}${val.cooked}`;
+            q.raw = `${q.raw}${val.raw}`;
+          }
+          else if (!!val.raw.trim()) qwz.push(jsCS.templateElement(val, false));
+        });
+        
+        node.value = (exp.length)
+          ? jsCS.jsxExpressionContainer(jsCS.templateLiteral(qwz, exp))
+          : jsCS.literal(qwz.reduce((str, { value }) => `${str}${value.raw}`, ''));
+      }
+      
+      return node;
+    });
+  
   root.find(jsCS.JSXIdentifier).forEach((np) => {
     const attrName = np.value.name;
-    if (attrName === 'className') np.value.name = 'class';
-    else if (attrName === 'defaultValue') np.value.name = 'value';
+    if (attrName === 'defaultValue') np.value.name = 'value';
     else if (attrName.startsWith('on')) {
       const parentName = np.parentPath.parentPath.parentPath.value.name.name;
       const standardDomNode = /[a-z]/.test(parentName[0]);
@@ -449,14 +502,12 @@ module.exports = function transformer(file, api) {
   // [state]
   // [refs]
   // [this]
-  // - Revisit `removeThis` calls now that I know more
   // [markup]
-  // - `class={`${ ROOT_CLASS } ${ styles }`}`
-  //   - Remove ` ${ styles }`
-  //   - Get `ROOT_CLASS` value from `styles.js` and swap it in.
-  //   - If there aren't anymore template strings, change to quoted item
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
+  // - Add any variable declarations/logic defined in `render` to the bottom of
+  //   the `script` tag, prepend with a TODO comment because it'll likely need
+  //   to refactored.
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
@@ -469,7 +520,10 @@ module.exports = function transformer(file, api) {
         case 'constructor': break;
         case 'render': {
           const returnNode = jsCS(np).find(jsCS.ReturnStatement).get().value.argument;
-          markup = jsCS(returnNode).toSource(recastOpts);
+          markup = jsCS(returnNode).toSource({
+            ...recastOpts,
+            quote: 'double',
+          });
           break;
         }
         default: {

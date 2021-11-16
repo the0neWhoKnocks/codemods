@@ -64,9 +64,14 @@ class Component1 extends ReactComponent {
     const {
       btnDisabled,
     } = this.state;
+    let rootModifier = '';
+    
+    if (items.length) {
+      rootModifier = 'has--items';
+    }
     
     return (
-      <div className={`${ ROOT_CLASS } ${ styles }`}>
+      <div className={`start ${ ROOT_CLASS } middle ${ styles } ${rootModifier}`}>
         <h3>A Title</h3>
         
         <form onSubmit={this.handleSubmit}>
