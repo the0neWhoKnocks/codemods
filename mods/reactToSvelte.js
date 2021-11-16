@@ -36,44 +36,55 @@ const parseNestedStyles = (css) => {
   let bracketIndent = '';
   const rawLines = css.split('\n');
   let rulesOffset;
-  const lines = rawLines.reduce((arr, line) => {
-    if (line === '--') return arr;
+  const lines = rawLines.reduce((arr, line, ndx) => {
+    if (
+      line === '--'
+      || (ndx === 0 && line.trim() === '')
+    ) return arr;
     
     let _line = line;
     
+    // get initial offset within the 'css' template string
     if (!rulesOffset) {
       const space = (_line.match(/^\s+/) || [''])[0];
       rulesOffset = new RegExp(`^${space}`);
     }
     
+    // trim offset
     _line = _line.replace(rulesOffset, '');
     
+    // end of rule
     if (_line.includes('}')) {
       ruleNames.pop();
       if (ruleNames.length) return arr;
     }
+    // start of rule
     else if (_line.includes('{') && !_line.includes('}')) {
       bracketIndent = (_line.match(/^\s+/) || [''])[0];
-      ruleNames.push((_line.match(/^(?:\s+)?([^ {]+) {/) || [,''])[1]);
-    
-      const nestedRuleName = ruleNames.join(' ').replace(' &', '');
-      _line = `${bracketIndent}${nestedRuleName} {`;
-    
+      ruleNames.push((_line.match(/^(?:\s+)?([^{]+) {/) || [,''])[1]);
+      const ruleName = ruleNames.join(' ')
+        // nested rules
+        .replace(/ &/g, '')
+        // top-level rules that would normally be prepended with a hashed rule
+        .replace(/^&/, '');
+      _line = `${bracketIndent}${ruleName} {`;
+      
       // remove empty parent
-      const nextLine = rawLines[arr.length + 1];
+      const nextLine = rawLines[ndx + 1];
       if (!nextLine.trim()) {
         rawLines[arr.length + 1] = '--';
         return arr;
       }
     }
     
-    const prevLine = arr[arr.length - 1];
+    const prevLine = arr[arr.length - 1] || '';
     const trimmedLine = _line.trim();
     
-    // close current rule
+    // close current parent rule (in nested scenario)
     if (prevLine && !prevLine.includes('}') && trimmedLine === '') {
       _line = '}';
     }
+    // remove multiple blank lines
     else if (trimmedLine === '' && prevLine.trim() === '') {
       return arr;
     }
@@ -82,6 +93,9 @@ const parseNestedStyles = (css) => {
     if (ruleNames.length > 1 && bracketIndent) {
       _line = _line.replace(new RegExp(`^${bracketIndent}`), '');
     }
+    
+    // the first rule can sometimes be empty (when nested) so don't add it
+    if (!arr.length && _line.trim() === '') return arr;
     
     arr.push(_line);
     
@@ -205,30 +219,36 @@ module.exports = function transformer(file, api) {
           cssVarMap[id.name] = init.value;
         });
         
-        const WRAPPED_SPACE = '  ';
+        let initialSpace = '';
         let unwrappedRootRule = false;
         const cssLines = templateLiteralToString(cssNode)
           .replace(/^\n/, '').replace(/\n$/, '')
           .split('\n')
-          .map((line, ndx) => {
+          .reduce((arr, line, ndx) => {
+            const lineIsEmpty = line.trim() === '';
             let _line = line;
             
-            if (ndx === 0 && !_line.includes('{')) {
+            if (!initialSpace) initialSpace = _line.match(/^(\s+)/)[1];
+            
+            if (ndx === 0 && !lineIsEmpty && !_line.includes('{')) {
               unwrappedRootRule = true;
-              _line = `.${cssVarMap.ROOT_CLASS} {\n${WRAPPED_SPACE}${_line}`;
+              _line = `.${cssVarMap.ROOT_CLASS} {\n${initialSpace}${_line}`;
             }
+            
             if (unwrappedRootRule) {
-              if (_line.trim() === '') {
-                _line = `${WRAPPED_SPACE}}\n`;
+              if (lineIsEmpty) {
+                _line = `${initialSpace}}\n`;
                 unwrappedRootRule = false;
               }
               else {
-                _line = `${WRAPPED_SPACE}${_line}`;
+                _line = `${initialSpace}${_line}`;
               }
             }
             
-            return _line;
-          });
+            arr.push(_line);
+            
+            return arr;
+          }, []);
         
         cssRules = parseNestedStyles(cssLines.join('\n'));
       }
