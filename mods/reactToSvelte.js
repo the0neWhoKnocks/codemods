@@ -132,17 +132,8 @@ module.exports = function transformer(file, api) {
   
   // [imports] =================================================================
   const imports = [];
-  const cssVarMap = {};
+  const exportedCSSVars = {};
   let cssRules;
-  
-  const templateLiteralToString = ({ expressions, quasis }) => {
-    let str = '';
-    quasis.forEach((q, ndx) => {
-      const exp = expressions[ndx] ? cssVarMap[expressions[ndx].name] : '';
-      str += `${q.value.raw}${exp}`;
-    });
-    return str;
-  };
   
   root.find(jsCS.ImportDeclaration)
   	.filter((np) => {
@@ -213,14 +204,53 @@ module.exports = function transformer(file, api) {
           : readFileSync(`${moduleSrc.value}.js`, 'utf8');
         const stylesRoot = jsCS(styles);
         const cssNode = stylesRoot.find(jsCS.TaggedTemplateExpression, { tag: { name: 'css' } }).get().node.quasi;
-        
-        stylesRoot.find(jsCS.VariableDeclarator, { init: { type: 'Literal' } }).forEach((np) => {
-          const { id, init } = np.node;
-          cssVarMap[id.name] = init.value;
-        });
-        
+        const cssVars = {};
+        const rootVars = new Map();
         let initialSpace = '';
         let unwrappedRootRule = false;
+        
+        stylesRoot.find(jsCS.VariableDeclaration).forEach((np) => {
+          const { type: parentType } = np.parentPath.node;
+          const { id: { name }, init: { value } } = np.node.declarations[0];
+          
+          if (parentType === 'ExportNamedDeclaration') exportedCSSVars[name] = value;
+          else cssVars[name] = value;
+        });
+        
+        const templateLiteralToString = ({ expressions, quasis }) => {
+          let str = '';
+          let lineIndent = '';
+          quasis.forEach((q, ndx) => {
+            const varName = expressions[ndx] && expressions[ndx].name;
+            let exp = exportedCSSVars[varName] || '';
+            
+            if (cssVars[varName]) {
+              const cssVarName = `--${varName.toLowerCase().replace(/_/g, '-')}`;
+              rootVars.set(cssVarName, cssVars[varName]);
+              exp = `var(${cssVarName})`;
+            }
+            
+            str += `${q.value.raw}${exp}`;
+            
+            if (ndx === 0) {
+              const lineWithRule = str.split('\n').find(l => /[.a-z]/i.test(l));
+              if (lineWithRule) lineIndent = lineWithRule.split('\n')[0].match(/^\s+/)[0];
+            }
+          });
+          
+          if (rootVars.size) {
+            str = [
+              `${lineIndent}:root {`,
+              ...[...rootVars.entries()].map(([n, v]) => `${lineIndent}${lineIndent}${n}: ${v};`),
+              `${lineIndent}}`,
+              lineIndent,
+              str,
+            ].join('\n');
+          }
+          
+          return str;
+        };
+        
         const cssLines = templateLiteralToString(cssNode)
           .replace(/^\n/, '').replace(/\n$/, '')
           .split('\n')
@@ -232,7 +262,7 @@ module.exports = function transformer(file, api) {
             
             if (ndx === 0 && !lineIsEmpty && !_line.includes('{')) {
               unwrappedRootRule = true;
-              _line = `.${cssVarMap.ROOT_CLASS} {\n${initialSpace}${_line}`;
+              _line = `.${exportedCSSVars.ROOT_CLASS} {\n${initialSpace}${_line}`;
             }
             
             if (unwrappedRootRule) {
@@ -453,9 +483,9 @@ module.exports = function transformer(file, api) {
           
           if (token) {
             // replace tokens from CSS
-            if (cssVarMap[token.name]) {
-              val.cooked = `${val.cooked}${cssVarMap[token.name]}`;
-              val.raw = `${val.raw}${cssVarMap[token.name]}`;
+            if (exportedCSSVars[token.name]) {
+              val.cooked = `${val.cooked}${exportedCSSVars[token.name]}`;
+              val.raw = `${val.raw}${exportedCSSVars[token.name]}`;
               append = true;
             }
             // omit certain tokens
@@ -519,7 +549,6 @@ module.exports = function transformer(file, api) {
   
   // TODO:
   // [import]
-  // - internal vars for 'styles' should be converted to `var()` statements
   // [props]
   // - parse functional args
   // [state]
