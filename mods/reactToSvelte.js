@@ -505,13 +505,15 @@ module.exports = function transformer(file, api) {
   // [markup]
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
-  // - Add any variable declarations/logic defined in `render` to the bottom of
-  //   the `script` tag, prepend with a TODO comment because it'll likely need
-  //   to refactored.
+  // [processing]
+  // - process a glob or multiple files at once?
+  // - output all errors/warnings to one log file
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
   let markup;
+  let miscRenderItems = [];
+  
   if (isClassComponent) {
     root.find(jsCS.MethodDefinition).forEach((np) => {
       const methodName = np.value.key.name;
@@ -519,11 +521,40 @@ module.exports = function transformer(file, api) {
       switch(methodName) {
         case 'constructor': break;
         case 'render': {
-          const returnNode = jsCS(np).find(jsCS.ReturnStatement).get().value.argument;
-          markup = jsCS(returnNode).toSource({
-            ...recastOpts,
-            quote: 'double',
+          np.node.value.body.body.forEach((node) => {
+            if (node) {
+              if (node.type === 'VariableDeclaration') {
+                const v = node.declarations[0].init.property;
+                
+                if (
+                  !v // normal variables
+                  || ( // destructured variables
+                    v && v.name
+                    && (v.name !== 'props' && v.name !== 'state')
+                  )
+                ) {
+                  miscRenderItems.push(node);
+                }
+              }
+              else if (node.type === 'ReturnStatement') {
+                markup = jsCS(node.argument).toSource({
+                  ...recastOpts,
+                  quote: 'double',
+                });
+              }
+              else miscRenderItems.push(node);
+            }
           });
+          
+          if (miscRenderItems.length) {
+            const raw = jsCS(miscRenderItems).toSource().join('\n');
+            miscRenderItems = [
+              '',
+              '// TODO: [manual refactor required] !!!!!!!',
+              ...raw.split('\n'),
+              '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+            ];
+          }
           break;
         }
         default: {
@@ -598,6 +629,9 @@ module.exports = function transformer(file, api) {
   }
   if (methods.length) {
     script.push(tabOver(methods, SCRIPT_SPACE).join('\n\n'));
+  }
+  if (miscRenderItems.length) {
+    script.push(tabOver(miscRenderItems, SCRIPT_SPACE).join('\n'));
   }
   if (script.length) {
     script = [
