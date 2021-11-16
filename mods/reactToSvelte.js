@@ -117,6 +117,7 @@ module.exports = function transformer(file, api) {
     quote: 'single',
     tabWidth: 2,
   };
+  const outputLog = [];
   let fnBody;
   
   const fileFolder = dirname(fullFilePath);
@@ -190,10 +191,7 @@ module.exports = function transformer(file, api) {
         let fullModulePath = `${modConf.outputPath}/${modulePath}`;
         
         if (!existsSync(fullModulePath)) {
-          console.warn([
-            `[WARN] Module "${modulePath}"`,
-            `       Not accessible from "${modConf.outputPath}/${fileName}.svelte"`,
-          ].join('\n'));
+          outputLog.push(`[WARN] Module "${modulePath}" not accessible`);
         }
       }
       
@@ -573,8 +571,6 @@ module.exports = function transformer(file, api) {
   // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
   // [processing]
-  // - process a glob or multiple files at once?
-  // - output all errors/warnings to one log file
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];
@@ -653,6 +649,7 @@ module.exports = function transformer(file, api) {
         ...raw.split('\n'),
         '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
       ];
+      outputLog.push('[TODO] Manual refactor required');
     }
   }
   
@@ -750,6 +747,17 @@ module.exports = function transformer(file, api) {
   ].join('\n');
   
   writeFileSync(`${modConf.outputPath}/${fileName}.svelte`, output);
+  
+  if (outputLog.length) {
+    console.log([
+      '----',
+      '',
+      ` "${modConf.outputPath}/${fileName}.svelte"`,
+      outputLog.map(l => `   ${l}`).join('\n'),
+      '',
+      '----',
+    ].join('\n'));
+  }
   
   return output;
 }
