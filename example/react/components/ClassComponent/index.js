@@ -4,7 +4,7 @@ import { API__UPDATE_DATA } from 'ROOT/conf.app';
 import fetch from 'UTILS/fetch';
 import styles, { ROOT_CLASS } from './styles';
 
-class Component1 extends ReactComponent {  
+class ClassComponent extends ReactComponent {  
   constructor() {
     super();
     
@@ -114,11 +114,11 @@ class Component1 extends ReactComponent {
   }
 }
 
-Component1.defaultProps = {
+ClassComponent.defaultProps = {
   items: [],
   value1: 'A Label',
 };
-Component1.propTypes = {
+ClassComponent.propTypes = {
   items: array,
   onChange: func,
   onDataUpdate: func,
@@ -126,4 +126,4 @@ Component1.propTypes = {
   value2: string,
 };
 
-export default Component1;
+export default ClassComponent;
