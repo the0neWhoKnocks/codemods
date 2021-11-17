@@ -133,8 +133,9 @@ module.exports = function transformer(file, api) {
   };
   
   // [imports] =================================================================
-  const imports = [];
+  const svelteImports = new Set();
   const exportedCSSVars = {};
+  let imports = [];
   let cssRules;
   
   root.find(jsCS.ImportDeclaration)
@@ -428,9 +429,18 @@ module.exports = function transformer(file, api) {
       },
     })
     .forEach((np) => {
-      const assignments = np.node.arguments[0].properties.map((n) => {
-        return jsCS.expressionStatement(jsCS.assignmentExpression('=', n.key, n.value));
+      const args = np.node.arguments;
+      const assignments = args[0].properties.map((n) => {
+        return jsCS.template.statement`${n.key} = ${n.value};`;
       });
+      
+      if (args[1]) {
+        const funcBody = args[1].body.body;
+        const tick = jsCS.template.statement`\ntick().then(() => {});`;
+        tick.expression.arguments[0].body.body.push(...funcBody);
+        assignments.push(tick);
+        svelteImports.add('tick');
+      }
       
       const body = getParentBody(np);
       const bodyNdx = body.findIndex((n, ndx) => n.start === np.node.start);
@@ -676,6 +686,16 @@ module.exports = function transformer(file, api) {
   
   let script = [];
   if (imports.length) {
+    if (svelteImports.size) {
+      const imps = [...svelteImports.values()].sort().map(i => {
+        return jsCS.importSpecifier(jsCS.identifier(i));
+      });
+      const imp = jsCS.template.statement`import { } from 'svelte';`;
+      imp.specifiers.push(...imps);
+      
+      imports = [jsCS(imp).toSource(), ...imports];
+    }
+    
     script.push(
       tabOver(imports, SCRIPT_SPACE).join('\n'),
       SCRIPT_SPACE
