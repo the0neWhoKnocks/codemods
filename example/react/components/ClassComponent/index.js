@@ -29,7 +29,9 @@ class ClassComponent extends ReactComponent {
       console.log('another random log');
     }
     else if (btnDisabled && value !== value1) {
-      this.setState({ btnDisabled: false });
+      this.setState({ btnDisabled: false }, () => {
+        console.log('disabled');
+      });
     }
     
     this.props.onChange(value);
