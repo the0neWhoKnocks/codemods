@@ -455,13 +455,6 @@ module.exports = function transformer(file, api) {
   
   // [ markup ] ================================================================
   
-  // jsCS.types.Type.def('SvelteIf')
-  //   .bases('IfStatement')
-  //   .build('name', 'program')
-  //   .field('name', jsCS.types.builtInTypes.string)
-  //   .field('program', jsCS.types.Type.def('Program'));
-  // jsCS.types.finalize();
-  
   const removeThis = (expr) => {
     let propName;
     
@@ -549,17 +542,17 @@ module.exports = function transformer(file, api) {
     }
   });
   
-  const getOp = (op) => {
-    let _op = op.operator || op.name;
-    if (op.argument) _op += getOp(op.argument);
-    return _op;
-  };
-  root.find(jsCS.LogicalExpression).forEach((np) => {
-    if (np.value.operator === '&&') {
-      const leftOp = getOp(np.value.left);
-      console.log(leftOp);
-    }
-  });
+  root
+    .find(jsCS.JSXExpressionContainer, {
+      expression: { operator: '&&' },
+    })
+    .replaceWith((np) => {
+      const exp = np.node.expression;
+      const leftExp = jsCS(exp.left).toSource();
+      const rightExp = jsCS(exp.right).toSource().split('\n').map(l => `  ${l}`).join('\n');
+      
+      return jsCS.jsxText(`{#if ${leftExp}}\n${rightExp}\n{/if}`);
+    });
   
   // TODO:
   // [import]
@@ -568,7 +561,6 @@ module.exports = function transformer(file, api) {
   // [refs]
   // [this]
   // [markup]
-  // - Replace blocks `{!!seriesAlias && (` with custom `{#if}`
   // - Replace blocks `{items.map(` with custom `{#each}`
   // [processing]
   
