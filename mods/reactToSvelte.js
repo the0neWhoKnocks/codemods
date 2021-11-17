@@ -542,6 +542,10 @@ module.exports = function transformer(file, api) {
     }
   });
   
+  const indentStr = (arr) => {
+    return arr.split('\n').map(l => `  ${l}`).join('\n');
+  };
+  
   root
     .find(jsCS.JSXExpressionContainer, {
       expression: { operator: '&&' },
@@ -549,20 +553,40 @@ module.exports = function transformer(file, api) {
     .replaceWith((np) => {
       const exp = np.node.expression;
       const leftExp = jsCS(exp.left).toSource();
-      const rightExp = jsCS(exp.right).toSource().split('\n').map(l => `  ${l}`).join('\n');
+      const rightExp = indentStr(jsCS(exp.right).toSource());
       
       return jsCS.jsxText(`{#if ${leftExp}}\n${rightExp}\n{/if}`);
     });
   
-  // TODO:
-  // [import]
-  // [props]
-  // [state]
-  // [refs]
-  // [this]
-  // [markup]
-  // - Replace blocks `{items.map(` with custom `{#each}`
-  // [processing]
+    root
+      .find(jsCS.JSXExpressionContainer, {
+        expression: { callee: { property: { name: 'map' } } },
+      })
+      .replaceWith((np) => {
+        const exp = np.node.expression;
+        const func = exp.arguments[0];
+        
+        // remove 'key' attribute
+        jsCS(func.body.body)
+          .find(jsCS.JSXAttribute, { name: { name: 'key' } })
+          .replaceWith((np) => {});
+        
+        // clean out empty attribute items, otherwise there'll be space in nodes
+        func.body.body.forEach(({ expression: { openingElement } }) => {
+          openingElement.attributes = openingElement.attributes.filter(a => !!a);
+        });
+        
+        const funcBody = indentStr(jsCS(func.body.body).toSource());
+        const arr = exp.callee.object.name;
+        const [arrItem, arrNdx] = func.params.map(p => p.name);
+        let ndx = '';
+        
+        // don't add ndx if it's not being used by anything else
+        const beingUsed = jsCS(func.body.body).find(jsCS.Identifier, { name: arrNdx }).length;
+        if (arrNdx && beingUsed) ndx = `, ${arrNdx}`;
+        
+        return jsCS.jsxText(`{#each ${arr} as ${arrItem}${ndx}}\n${funcBody}\n{/each}`);
+      });
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
   const methods = [];

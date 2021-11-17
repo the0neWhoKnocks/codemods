@@ -109,6 +109,11 @@ class ClassComponent extends ReactComponent {
             <li key={ndx}>{item}</li>
           })}
         </ul>
+        <ul>
+          {items.map((item, ndx) => {
+            <li key={ndx} data-ndx={ndx}>{item}</li>
+          })}
+        </ul>
       </div>
     );
   }
