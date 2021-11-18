@@ -259,7 +259,7 @@ module.exports = function transformer(file, api) {
             const lineIsEmpty = line.trim() === '';
             let _line = line;
             
-            if (!initialSpace) initialSpace = _line.match(/^(\s+)/)[1];
+            if (!initialSpace) initialSpace = (_line.match(/^(\s+)/) || [])[1];
             
             if (ndx === 0 && !lineIsEmpty && !_line.includes('{')) {
               unwrappedRootRule = true;
@@ -431,11 +431,13 @@ module.exports = function transformer(file, api) {
     })
     .forEach((np) => {
       const args = np.node.arguments;
-      const assignments = args[0].properties.map((n) => {
-        return jsCS.template.statement`${n.key} = ${n.value};`;
-      });
+      const assignments = (args[0].properties)
+        ? args[0].properties.map((n) => {
+            return jsCS.template.statement`${n.key} = ${n.value};\n`;
+          })
+        : [];
       
-      if (args[1]) {
+      if (args[1] && args[1].body && args[1].body.body) {
         const funcBody = args[1].body.body;
         const tick = jsCS.template.statement`\ntick().then(() => {});`;
         tick.expression.arguments[0].body.body.push(...funcBody);
@@ -443,8 +445,9 @@ module.exports = function transformer(file, api) {
         svelteImports.add('tick');
       }
       
+      // replace current call with parsed data
       const body = getParentBody(np);
-      const bodyNdx = body.findIndex((n, ndx) => n.start === np.node.start);
+      const bodyNdx = body.findIndex((n, ndx) => n && n.start === np.node.start);
       body.splice(bodyNdx, 1, ...assignments);
     });
   
@@ -494,35 +497,37 @@ module.exports = function transformer(file, api) {
         const exp = [];
         const qwz = [];
         
-        quasis.forEach(({ value }, ndx) => {
-          const token = expressions[ndx];
-          const val = { ...value };
-          let append = false;
-          
-          if (token) {
-            // replace tokens from CSS
-            if (exportedCSSVars[token.name]) {
-              val.cooked = `${val.cooked}${exportedCSSVars[token.name]}`;
-              val.raw = `${val.raw}${exportedCSSVars[token.name]}`;
-              append = true;
+        if (quasis) {
+          quasis.forEach(({ value }, ndx) => {
+            const token = expressions[ndx];
+            const val = { ...value };
+            let append = false;
+            
+            if (token) {
+              // replace tokens from CSS
+              if (exportedCSSVars[token.name]) {
+                val.cooked = `${val.cooked}${exportedCSSVars[token.name]}`;
+                val.raw = `${val.raw}${exportedCSSVars[token.name]}`;
+                append = true;
+              }
+              // omit certain tokens
+              else if (token.name === 'styles') {
+                append = true;
+              }
+              // add remaining tokens
+              else {
+                exp.push(token);
+              }
             }
-            // omit certain tokens
-            else if (token.name === 'styles') {
-              append = true;
+            
+            if (append && qwz.length) {
+              const q = qwz[qwz.length - 1].value;
+              q.cooked = `${q.cooked}${val.cooked}`;
+              q.raw = `${q.raw}${val.raw}`;
             }
-            // add remaining tokens
-            else {
-              exp.push(token);
-            }
-          }
-          
-          if (append && qwz.length) {
-            const q = qwz[qwz.length - 1].value;
-            q.cooked = `${q.cooked}${val.cooked}`;
-            q.raw = `${q.raw}${val.raw}`;
-          }
-          else if (!!val.raw.trim()) qwz.push(jsCS.templateElement(val, false));
-        });
+            else if (!!val.raw.trim()) qwz.push(jsCS.templateElement(val, false));
+          });
+        }
         
         node.value = (exp.length)
           ? jsCS.jsxExpressionContainer(jsCS.templateLiteral(qwz, exp))
@@ -537,7 +542,7 @@ module.exports = function transformer(file, api) {
     if (attrName === 'defaultValue') np.value.name = 'value';
     else if (attrName === 'htmlFor') np.value.name = 'for';
     else if (attrName.startsWith('on')) {
-      const parentName = np.parentPath.parentPath.parentPath.value.name.name;
+      const parentName = np.parentPath.parentPath.parentPath.value.name.name || [''];
       const standardDomNode = /[a-z]/.test(parentName[0]);
       
       removeThis(np.parentPath.value.value.expression);
@@ -568,7 +573,7 @@ module.exports = function transformer(file, api) {
       
       return jsCS.jsxText(`{#if ${leftExp}}\n${rightExp}\n{/if}`);
     });
-  
+    
     root
       .find(jsCS.JSXExpressionContainer, {
         expression: { callee: { property: { name: 'map' } } },
@@ -728,8 +733,8 @@ module.exports = function transformer(file, api) {
     });
     
     if (miscRenderItems.length) {
-      // result is not an Array
-      const raw = jsCS(miscRenderItems).toSource().join('\n');
+      let raw = jsCS(miscRenderItems).toSource();
+      if (Array.isArray(raw)) raw = raw.join('\n');
       miscRenderItems = [...raw.split('\n')];
     }
   }
@@ -769,6 +774,8 @@ module.exports = function transformer(file, api) {
       return arr;
     };
     const sortVars = ([propA], [propB]) => {
+      if (!propA) return 0;
+      
       const lowerPropA = propA.toLowerCase();
       const lowerPropB = propB.toLowerCase();
       const subCheck = (lowerPropB > lowerPropA) ? -1 : 0;
