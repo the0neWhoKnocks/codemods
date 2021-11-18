@@ -118,6 +118,7 @@ module.exports = function transformer(file, api) {
     tabWidth: 2,
   };
   const outputLog = [];
+  const eachHandlers = [];
   let fnBody;
   
   const fileFolder = dirname(fullFilePath);
@@ -575,27 +576,86 @@ module.exports = function transformer(file, api) {
       .replaceWith((np) => {
         const exp = np.node.expression;
         const func = exp.arguments[0];
+        const funcBody = func.body;
+        const handlerVars = new Set();
+        let funcRet;
+        let eachHandler;
+        
+        switch(funcBody.type) {
+          case 'JSXElement': { // for loops that just return markup
+            funcRet = [funcBody];
+            break;
+          }
+          case 'BlockStatement': { // for loops that manipulate data before returning
+            const handlerBody = [];
+            
+            funcBody.body.forEach((n) => {
+              if (n.type === 'ReturnStatement') {
+                funcRet = [n.argument];
+              }
+              else {
+                if (n.type === 'VariableDeclaration') {
+                  handlerVars.add(n.declarations[0].id.name);
+                }
+                handlerBody.push(n);
+              }
+            });
+            
+            // construct a handler that'll return the manipulated data
+            const handlerExport = (handlerVars.size)
+              ? `{ ${[...handlerVars.values()].sort().join(', ')} }`
+              : '{}';
+            if (handlerBody.length) {
+              const arrName = exp.callee.object.name;
+              const h = jsCS.template.statement`const h = (arr) => {};`;
+              const m = jsCS.template.statement`return arr.map(() => {});`;
+              const r = jsCS.template.statement`return {};`;
+              h.declarations[0].id.name = `eachHandler${eachHandlers.length + 1}`;
+              h.declarations[0].init.params[0].name = arrName;
+              m.argument.callee.object.name = arrName;
+              m.argument.arguments[0].params = [...func.params];
+              jsCS(h).find(jsCS.ArrowFunctionExpression).get().node.body.body = [m];
+              jsCS(m).find(jsCS.ArrowFunctionExpression).get().node.body.body = [...handlerBody, r];
+              jsCS(r).get().node.argument.properties = [
+                ...handlerVars.values(),
+                func.params[0].name,
+              ].sort();
+              
+              eachHandler = h;
+            }
+            
+            break;
+          }
+        }
         
         // remove 'key' attribute
-        jsCS(func.body.body)
+        jsCS(funcRet)
           .find(jsCS.JSXAttribute, { name: { name: 'key' } })
           .replaceWith((np) => {});
         
         // clean out empty attribute items, otherwise there'll be space in nodes
-        func.body.body.forEach(({ expression: { openingElement } }) => {
+        funcRet.forEach(({ openingElement }) => {
           openingElement.attributes = openingElement.attributes.filter(a => !!a);
         });
-        
-        const funcBody = indentStr(jsCS(func.body.body).toSource());
-        const arr = exp.callee.object.name;
+
+        const funcBodyStr = indentStr(jsCS(funcRet).toSource());
         const [arrItem, arrNdx] = func.params.map(p => p.name);
+        let arr = exp.callee.object.name;
+        let arrAs = arrItem;
         let ndx = '';
-        
+
         // don't add ndx if it's not being used by anything else
-        const beingUsed = jsCS(func.body.body).find(jsCS.Identifier, { name: arrNdx }).length;
+        const beingUsed = jsCS(funcRet).find(jsCS.Identifier, { name: arrNdx }).length;
         if (arrNdx && beingUsed) ndx = `, ${arrNdx}`;
         
-        return jsCS.jsxText(`{#each ${arr} as ${arrItem}${ndx}}\n${funcBody}\n{/each}`);
+        // insert constructed handler call
+        if (eachHandler) {
+          eachHandlers.push(jsCS(eachHandler).toSource());
+          arr = `${eachHandler.declarations[0].id.name}(${arr})`;
+          arrAs = `{ ${[...handlerVars.values(), arrAs].sort().join(', ')} }`;
+        }
+        
+        return jsCS.jsxText(`{#each ${arr} as ${arrAs}${ndx}}\n${funcBodyStr}\n{/each}`);
       });
   
   const isClassComponent = !!root.find(jsCS.ClassDeclaration).length;
@@ -668,14 +728,9 @@ module.exports = function transformer(file, api) {
     });
     
     if (miscRenderItems.length) {
+      // result is not an Array
       const raw = jsCS(miscRenderItems).toSource().join('\n');
-      miscRenderItems = [
-        '',
-        '// TODO: [manual refactor required] !!!!!!!',
-        ...raw.split('\n'),
-        '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
-      ];
-      outputLog.push('[TODO] Manual refactor required');
+      miscRenderItems = [...raw.split('\n')];
     }
   }
   
@@ -751,8 +806,25 @@ module.exports = function transformer(file, api) {
   if (methods.length) {
     script.push(tabOver(methods, SCRIPT_SPACE).join('\n\n'));
   }
-  if (miscRenderItems.length) {
-    script.push(tabOver(miscRenderItems, SCRIPT_SPACE).join('\n'));
+  if (
+    eachHandlers.length
+    || miscRenderItems.length
+  ) {
+    let requiresRefactor = [];
+    
+    if (eachHandlers.length) requiresRefactor.push(...eachHandlers);
+    if (requiresRefactor.length) requiresRefactor.push('');
+    if (miscRenderItems.length) requiresRefactor.push(...miscRenderItems);
+    
+    requiresRefactor = [
+      '',
+      '// TODO: [manual refactor required] !!!!!!!',
+      ...requiresRefactor,
+      '// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    ];
+    outputLog.push('[TODO] Manual refactor required');
+    
+    script.push(tabOver(requiresRefactor, SCRIPT_SPACE).join('\n'));
   }
   if (script.length) {
     script = [

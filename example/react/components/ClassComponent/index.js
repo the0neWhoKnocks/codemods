@@ -107,13 +107,29 @@ class ClassComponent extends ReactComponent {
         </form>
         
         <ul>
-          {items.map((item, ndx) => {
+          {items.map((item, ndx) => (
             <li key={ndx}>{item}</li>
+          ))}
+        </ul>
+        <ul>
+          {items.map((item, ndx) => (
+            <li key={ndx} data-ndx={ndx}>{item}</li>
+          ))}
+        </ul>
+        <ul>
+          {items.map((item, ndx) => {
+            let str = 'string';
+            if (ndx) str = `${str} ${ndx}`;
+            return <li key={ndx}>{item} {str}</li>;
           })}
         </ul>
         <ul>
           {items.map((item, ndx) => {
-            <li key={ndx} data-ndx={ndx}>{item}</li>
+            return (
+              <li key={ndx}>
+                {item}
+              </li>
+            );
           })}
         </ul>
       </div>
